@@ -22,6 +22,9 @@ pub enum Command {
         name: String,
         exact: bool,
     },
+    Monitor { 
+        interval: u64 
+    },
     Help,
     Exit,
     Unknown(String),
@@ -58,6 +61,20 @@ impl CommandParser {
             "info" | "show" => self.parse_info_command(&parts[1..]),
             "stats" | "status" => self.parse_stats_command(&parts[1..]),
             "search" | "find" => self.parse_search_command(&parts[1..]),
+            "monitor" => {
+                // Use parts after command word as args:
+                let args = &parts[1..];
+                // Now you can use args here safely
+                let interval = if !args.is_empty() {
+                    args[0].parse::<u64>().unwrap_or(2)
+                } else {
+                    2
+                };
+                return ParseResult {
+                    command: Command::Monitor { interval },
+                    raw_input: input.to_string(),
+                };
+            },
             "help" => ParseResult {
                 command: Command::Help,
                 raw_input: input.to_string(),
@@ -172,7 +189,7 @@ impl CommandParser {
             } else if *arg == "--refresh" {
                 // Handle case where refresh interval is next argument
                 if i + 1 < args.len() {
-                    if let Ok(interval) = args[i + 1].parse() {
+                    if let Ok(interval) = args[i + 1].parse::<u64>() {
                         refresh_interval = Some(interval);
                     }
                 }
