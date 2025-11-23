@@ -1,5 +1,7 @@
 mod parser;
 mod proc_reader;
+mod nice_renice;
+use nice_renice::{get_nice, set_nice, renice};
 
 use proc_reader::{enumerate_processes, parse_process};
 use parser::{Command, CommandParser};
