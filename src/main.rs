@@ -1,14 +1,13 @@
 mod parser;
 mod proc_reader;
 
-use proc_reader::get_process_metrics;
+use proc_reader::{enumerate_processes, parse_process};
 use parser::{Command, CommandParser};
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
 use sysinfo::CpuExt;
-
 use sysinfo::{System, SystemExt};
 use std::{thread, time};
 
@@ -48,25 +47,22 @@ fn monitor_processes(interval: u64) {
             "PID", "Process", "User", "%CPU", "Memory(KB)", "Read/Write (bytes)"
         );
 
-        for entry in std::fs::read_dir("/proc").unwrap() {
-            let entry = entry.unwrap();
-            let filename = entry.file_name();
-            if let Ok(pid) = filename.to_str().unwrap_or("").parse::<u32>() {
-                if let Ok(metrics) = get_process_metrics(pid) {
-                    // Print formatted process info
-                    println!(
-                        "{:<8} {:<15} {:<10} {:<10.2} {:<15} {:<7}/{}",
-                        metrics.pid,
-                        metrics.comm,
-                        metrics.user,
-                        metrics.cpu_time, // Here, cpu_time is %CPU
-                        metrics.mem_usage,
-                        metrics.io_read_bytes,
-                        metrics.io_write_bytes
-                    );
-                }
-            }
+        // Use enumerate_processes() here for unified collection
+        let process_list = enumerate_processes();
+        for process in process_list {
+            // Assuming cpu_time is %CPU here as per ProcessInfo structure
+            println!(
+                "{:<8} {:<15} {:<10} {:<10.2} {:<15} {:<7}/{}",
+                process.pid,
+                process.name,
+                process.username,
+                process.cpu_time_ms as f64 / 1000.0, // assuming cpu_time_ms stored in ms
+                process.memory_kb,
+                process.io_read_bytes,
+                process.io_write_bytes
+            );
         }
+
         thread::sleep(time::Duration::from_secs(interval));
     }
 }
@@ -81,22 +77,19 @@ fn main() {
     loop {
         print!("lpm> ");
         io::stdout().flush().unwrap();
-        
+
         input.clear();
         io::stdin().read_line(&mut input).unwrap();
-        
+
         let result = parser.parse(&input);
-        
+
         match result.command {
             Command::ListProcesses { all, user, sort_by } => {
-                for entry in std::fs::read_dir("/proc").unwrap() {
-                    let entry = entry.unwrap();
-                    let filename = entry.file_name();
-                    if let Ok(pid) = filename.to_str().unwrap_or("").parse::<u32>() {
-                        if let Ok(metrics) = get_process_metrics(pid) {
-                            println!("{:?}", metrics);
-                        }
-                    }
+                // Use enumerate_processes() here too
+                let process_list = enumerate_processes();
+                // TODO: implement filtering by user and sorting later
+                for process in process_list {
+                    println!("{:?}", process);
                 }
             }
             Command::KillProcess { pid, signal } => {
@@ -110,11 +103,10 @@ fn main() {
                     Err(e) => println!("Failed to kill process {}: {}", pid, e),
                 }
             }
-
             Command::ProcessInfo { pid, detailed } => {
-                match get_process_metrics(pid) {
-                    Ok(metrics) => println!("{:?}", metrics),
-                    Err(e) => println!("Error reading process metrics: {}", e),
+                match proc_reader::parse_process(pid) {
+                    Some(metrics) => println!("{:?}", metrics),
+                    None => println!("Error reading process metrics for pid {}", pid),
                 }
             }
             Command::SystemStats { refresh_interval } => {
@@ -140,7 +132,6 @@ fn main() {
                     println!("CPU usage: {:.2}%", sys.global_cpu_info().cpu_usage());
                 }
             }
-
             Command::SearchProcess { name, exact } => {
                 println!("Searching for process '{}' (exact: {})", name, exact);
                 // TODO: Implement actual process search
