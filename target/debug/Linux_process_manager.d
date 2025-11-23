@@ -1,1 +1,1 @@
-/home/samar/OS-Project-Linux/target/debug/Linux_process_manager: /home/samar/OS-Project-Linux/src/main.rs /home/samar/OS-Project-Linux/src/parser.rs /home/samar/OS-Project-Linux/src/proc_reader.rs
+/home/samar/OS-Project-Linux/target/debug/Linux_process_manager: /home/samar/OS-Project-Linux/src/main.rs /home/samar/OS-Project-Linux/src/nice_renice.rs /home/samar/OS-Project-Linux/src/parser.rs /home/samar/OS-Project-Linux/src/proc_reader.rs

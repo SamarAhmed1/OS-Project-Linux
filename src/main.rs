@@ -134,6 +134,24 @@ fn main() {
                     println!("CPU usage: {:.2}%", sys.global_cpu_info().cpu_usage());
                 }
             }
+            Command::get_nice { pid } => {
+                match get_nice(pid) {
+                    Ok(nice) => println!("Process {} nice value: {}", pid, nice),
+                    Err(e) => println!("Failed to get nice value for {}: {}", pid, e),
+                }
+            }
+            Command::set_nice { pid, nice } => {
+                match set_nice(pid, nice) {
+                    Ok(()) => println!("Set nice value for process {} to {}", pid, nice),
+                    Err(e) => println!("Failed to set nice value for {}: {}", pid, e),
+                }
+            }
+            Command::renice { pid, delta } => {
+                match renice(pid, delta) {
+                    Ok(new_nice) => println!("Reniced process {} by {}; new nice value: {}", pid, delta, new_nice),
+                    Err(e) => println!("Failed to renice process {}: {}", pid, e),
+                }
+            }
             Command::SearchProcess { name, exact } => {
                 println!("Searching for process '{}' (exact: {})", name, exact);
                 // TODO: Implement actual process search

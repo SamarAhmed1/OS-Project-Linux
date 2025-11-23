@@ -9,6 +9,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm 0.26.1",
+ "errno",
  "hostname",
  "libc",
  "nix",
