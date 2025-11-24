@@ -1,7 +1,8 @@
 mod parser;
 mod proc_reader;
 mod nice_renice;
-use nice_renice::{get_nice, set_nice, renice};
+use nice_renice::{get_nice, set_nice, renice, spawn_with_nice};
+
 
 use proc_reader::{enumerate_processes, parse_process};
 use parser::{Command, CommandParser};
@@ -152,6 +153,21 @@ fn main() {
                     Err(e) => println!("Failed to renice process {}: {}", pid, e),
                 }
             }
+            Command::NiceStart { nice, cmd, args } => {
+                match spawn_with_nice(nice, &cmd, &args) {
+                    Ok(child) => {
+                        println!(
+                            "Started '{}' (PID {}) with nice {}",
+                            cmd,
+                            child.id(),
+                            nice
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to start process with nice: {}", e);
+                    }
+                }
+            }
             Command::SearchProcess { name, exact } => {
                 println!("Searching for process '{}' (exact: {})", name, exact);
                 // TODO: Implement actual process search
@@ -181,8 +197,11 @@ fn show_help() {
     println!("  info, show PID     - Show process information (flags: -d/--detailed)");
     println!("  stats, status      - Show system statistics (flags: --refresh SECONDS)");
     println!("  search, find NAME  - Search for process by name (flags: -e/--exact)");
+    println!("  nice N CMD [ARGS]  - Start CMD with nice value N (-20..19)");
+    println!("  renice PID DELTA   - Adjust nice of PID by DELTA");
     println!("  Monitor (Seconds)  - Live process monitor (refresh every N seconds)");
     println!("  help               - Show this help message");
     println!("  exit, quit         - Exit the program");
     println!();
 }
+

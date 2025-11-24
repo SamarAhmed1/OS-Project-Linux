@@ -1,4 +1,5 @@
 use libc::{self, c_int};
+use std::process::{Child, Command as ProcessCommand};
 
 /// Get the current nice value of a process (returns i32 in range [-20, 19])
 pub fn get_nice(pid: u32) -> Result<i32, String> {
@@ -48,4 +49,23 @@ pub fn renice(pid: u32, delta: i32) -> Result<i32, String> {
     let new_nice = (current + delta).clamp(-20, 19);
     set_nice(pid, new_nice)?;
     Ok(new_nice)
+}
+/// Spawn a new process with the given nice value
+pub fn spawn_with_nice(nice: i32, cmd: &str, args: &[String]) -> Result<Child, String> {
+    let mut child = ProcessCommand::new(cmd)
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("failed to start '{}': {}", cmd, e))?;
+
+    // Set the child's nice value (absolute)
+    if let Err(e) = set_nice(child.id(), nice) {
+        eprintln!(
+            "Warning: started process {} ('{}'), but failed to set nice: {}",
+            child.id(),
+            cmd,
+            e
+        );
+    }
+
+    Ok(child)
 }

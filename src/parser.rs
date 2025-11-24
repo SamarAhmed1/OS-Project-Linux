@@ -25,6 +25,11 @@ pub enum Command {
     Monitor { 
         interval: u64 
     },
+    NiceStart {
+        nice: i32,
+        cmd: String,
+        args:Vec <String>
+    },
     get_nice{ pid: u32 },
     set_nice{ pid: u32, nice: i32 },
     renice{ pid: u32, delta: i32 },
@@ -78,44 +83,39 @@ impl CommandParser {
                     raw_input: input.to_string(),
                 };
             },
+                        // NICE: 'nice <value> <command> [args...]'
             "nice" => {
-                        let args = &parts[1..];
-                        if args.is_empty() {
-                            return ParseResult {
-                                command: Command::Unknown("nice: missing PID".into()),
-                                raw_input: input.to_string(),
-                            };
-                        }
-                        let pid = match args[0].parse::<u32>() {
-                            Ok(pid) => pid,
-                            Err(_) => {
-                                return ParseResult {
-                                    command: Command::Unknown(format!("nice: invalid PID '{}'", args[0])),
-                                    raw_input: input.to_string(),
-                                }
-                            }
+                let args = &parts[1..];
+                if args.len() < 2 {
+                    return ParseResult {
+                        command: Command::Unknown(
+                            "nice: usage: nice <value> <command> [args...]".into(),
+                        ),
+                        raw_input: input.to_string(),
+                    };
+                }
+
+                let nice = match args[0].parse::<i32>() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        return ParseResult {
+                            command: Command::Unknown(
+                                format!("nice: invalid value '{}'", args[0]),
+                            ),
+                            raw_input: input.to_string(),
                         };
-                        if args.len() == 1 {
-                            ParseResult {
-                                command: Command::get_nice { pid },
-                                raw_input: input.to_string(),
-                            }
-                        } else {
-                            let nice = match args[1].parse::<i32>() {
-                                Ok(n) => n,
-                                Err(_) => {
-                                    return ParseResult {
-                                        command: Command::Unknown(format!("nice: invalid value '{}'", args[1])),
-                                        raw_input: input.to_string(),
-                                    }
-                                }
-                            };
-                            ParseResult {
-                                command: Command::set_nice { pid, nice },
-                                raw_input: input.to_string(),
-                            }
-                        }
                     }
+                };
+
+                let cmd = args[1].to_string();
+                let cmd_args = args[2..].iter().map(|s| s.to_string()).collect();
+
+                ParseResult {
+                    command: Command::NiceStart { nice, cmd, args: cmd_args },
+                    raw_input: input.to_string(),
+                }
+            }
+
                     // RENICE: 'renice <pid> <delta>'
                     "renice" => {
                         let args = &parts[1..];
