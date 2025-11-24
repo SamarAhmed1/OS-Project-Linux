@@ -1,3 +1,5 @@
+cargo-features = ["edition2024"]
+
 [package]
 name = "Linux_process_manager"
 version = "0.1.0"

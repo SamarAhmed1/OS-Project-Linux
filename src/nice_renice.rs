@@ -2,22 +2,42 @@ use libc::{self, c_int};
 
 /// Get the current nice value of a process (returns i32 in range [-20, 19])
 pub fn get_nice(pid: u32) -> Result<i32, String> {
-    errno::set_errno(errno::Errno(0));
+    // Clear errno before the call
+    unsafe { *libc::__errno_location() = 0; }
+    
     let prio = unsafe { libc::getpriority(libc::PRIO_PROCESS, pid) };
-    let err = errno::errno().0;
+    let err = unsafe { *libc::__errno_location() };
 
-    if err != 0 {
+    // getpriority returns -1 on error, but -1 could also be a valid priority
+    // so we must check errno
+    if prio == -1 && err != 0 {
         return Err(format!("getpriority failed with errno {}", err));
     }
-    Ok(prio)
+    
+    // getpriority returns the priority value (20 - nice_value)
+    // So we need to convert: nice = 20 - priority
+    // But actually, getpriority returns values in range [0, 39] mapped from [-20, 19]
+    // The actual return is: 20 - nice_value
+    // So: nice_value = 20 - return_value
+    Ok(20 - prio)
 }
 
 /// Set absolute nice value (e.g. -5, 0, 10)
 pub fn set_nice(pid: u32, nice: i32) -> Result<(), String> {
+    // Clamp the nice value to valid range
+    let nice = nice.clamp(-20, 19);
+    
     let res = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid, nice as c_int) };
     if res == -1 {
-        let err = errno::errno().0;
-        return Err(format!("setpriority failed with errno {}", err));
+        let err = unsafe { *libc::__errno_location() };
+        return Err(format!("setpriority failed with errno {}: {}", err, 
+            match err {
+                1 => "Operation not permitted (need root/CAP_SYS_NICE)",
+                3 => "No such process",
+                22 => "Invalid argument",
+                _ => "Unknown error"
+            }
+        ));
     }
     Ok(())
 }
