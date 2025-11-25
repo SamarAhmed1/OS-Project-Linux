@@ -135,22 +135,22 @@ fn main() {
                     println!("CPU usage: {:.2}%", sys.global_cpu_info().cpu_usage());
                 }
             }
-            Command::get_nice { pid } => {
-                match get_nice(pid) {
-                    Ok(nice) => println!("Process {} nice value: {}", pid, nice),
-                    Err(e) => println!("Failed to get nice value for {}: {}", pid, e),
-                }
-            }
-            Command::set_nice { pid, nice } => {
-                match set_nice(pid, nice) {
-                    Ok(()) => println!("Set nice value for process {} to {}", pid, nice),
-                    Err(e) => println!("Failed to set nice value for {}: {}", pid, e),
-                }
-            }
-            Command::renice { pid, delta } => {
-                match renice(pid, delta) {
-                    Ok(new_nice) => println!("Reniced process {} by {}; new nice value: {}", pid, delta, new_nice),
-                    Err(e) => println!("Failed to renice process {}: {}", pid, e),
+            Command::Renice { pid, nice } => {
+                match nice {
+                    None => {
+                        // Get nice value
+                        match get_nice(pid) {
+                            Ok(nice_val) => println!("Process {} nice value: {}", pid, nice_val),
+                            Err(e) => println!("Failed to get nice value for {}: {}", pid, e),
+                        }
+                    }
+                    Some(nice_val) => {
+                        // Set nice value
+                        match set_nice(pid, nice_val) {
+                            Ok(()) => println!("Set nice value for process {} to {}", pid, nice_val),
+                            Err(e) => println!("Failed to set nice value for {}: {}", pid, e),
+                        }
+                    }
                 }
             }
             Command::NiceStart { nice, cmd, args } => {
@@ -192,16 +192,17 @@ fn main() {
 
 fn show_help() {
     println!("\nAvailable commands:");
-    println!("  ps, list           - List processes (flags: -a/--all, -u/--user USER, -s/--sort FIELD)");
+    println!("  ps, list           - List processes");
     println!("  kill PID [SIGNAL]  - Kill process with optional signal");
-    println!("  info, show PID     - Show process information (flags: -d/--detailed)");
-    println!("  stats, status      - Show system statistics (flags: --refresh SECONDS)");
-    println!("  search, find NAME  - Search for process by name (flags: -e/--exact)");
+    println!("  info PID           - Show process information");
+    println!("  stats              - Show system statistics");
+    println!("  search NAME        - Search for process by name");
     println!("  nice N CMD [ARGS]  - Start CMD with nice value N (-20..19)");
-    println!("  renice PID DELTA   - Adjust nice of PID by DELTA");
-    println!("  Monitor (Seconds)  - Live process monitor (refresh every N seconds)");
-    println!("  help               - Show this help message");
-    println!("  exit, quit         - Exit the program");
+    println!("  renice PID [N]     - Get or set nice value of PID");
+    println!("                       renice 1234     -> get nice value");
+    println!("                       renice 1234 10  -> set nice value to 10");
+    println!("  monitor [SEC]      - Live process monitor");
+    println!("  help               - Show this help");
+    println!("  exit, quit         - Exit");
     println!();
 }
-

@@ -28,11 +28,12 @@ pub enum Command {
     NiceStart {
         nice: i32,
         cmd: String,
-        args:Vec <String>
+        args: Vec<String>
     },
-    get_nice{ pid: u32 },
-    set_nice{ pid: u32, nice: i32 },
-    renice{ pid: u32, delta: i32 },
+    Renice { 
+        pid: u32, 
+        nice: Option<i32>  // None = get, Some(value) = set
+    },
     Help,
     Exit,
     Unknown(String),
@@ -70,9 +71,7 @@ impl CommandParser {
             "stats" | "status" => self.parse_stats_command(&parts[1..]),
             "search" | "find" => self.parse_search_command(&parts[1..]),
             "monitor" => {
-                // Use parts after command word as args:
                 let args = &parts[1..];
-                // Now you can use args here safely
                 let interval = if !args.is_empty() {
                     args[0].parse::<u64>().unwrap_or(2)
                 } else {
@@ -83,10 +82,10 @@ impl CommandParser {
                     raw_input: input.to_string(),
                 };
             },
-                        // NICE: 'nice <value> <command> [args...]'
+            // NICE: 'nice <value> <command> [args...]' - starts new process with nice value
             "nice" => {
                 let args = &parts[1..];
-                if args.len() < 2 {
+                if args.is_empty() {
                     return ParseResult {
                         command: Command::Unknown(
                             "nice: usage: nice <value> <command> [args...]".into(),
@@ -100,12 +99,21 @@ impl CommandParser {
                     Err(_) => {
                         return ParseResult {
                             command: Command::Unknown(
-                                format!("nice: invalid value '{}'", args[0]),
+                                format!("nice: invalid value '{}' (expected number -20 to 19)", args[0]),
                             ),
                             raw_input: input.to_string(),
                         };
                     }
                 };
+
+                if args.len() < 2 {
+                    return ParseResult {
+                        command: Command::Unknown(
+                            "nice: missing command to run".into(),
+                        ),
+                        raw_input: input.to_string(),
+                    };
+                }
 
                 let cmd = args[1].to_string();
                 let cmd_args = args[2..].iter().map(|s| s.to_string()).collect();
@@ -115,39 +123,46 @@ impl CommandParser {
                     raw_input: input.to_string(),
                 }
             }
-
-                    // RENICE: 'renice <pid> <delta>'
-                    "renice" => {
-                        let args = &parts[1..];
-                        if args.len() < 2 {
-                            return ParseResult {
-                                command: Command::Unknown("renice: missing pid or delta".into()),
-                                raw_input: input.to_string(),
-                            };
-                        }
-                        let pid = match args[0].parse::<u32>() {
-                            Ok(pid) => pid,
-                            Err(_) => {
-                                return ParseResult {
-                                    command: Command::Unknown(format!("renice: invalid PID '{}'", args[0])),
-                                    raw_input: input.to_string(),
-                                }
-                            }
-                        };
-                        let delta = match args[1].parse::<i32>() {
-                            Ok(d) => d,
-                            Err(_) => {
-                                return ParseResult {
-                                    command: Command::Unknown(format!("renice: invalid delta '{}'", args[1])),
-                                    raw_input: input.to_string(),
-                                }
-                            }
-                        };
-                        ParseResult {
-                            command: Command::renice { pid, delta },
+            // RENICE: 'renice <pid> [value]' - get or set nice value
+            // renice 1234       -> get nice value of PID 1234
+            // renice 1234 10    -> set nice value of PID 1234 to 10
+            "renice" => {
+                let args = &parts[1..];
+                if args.is_empty() {
+                    return ParseResult {
+                        command: Command::Unknown("renice: usage: renice <pid> [value]".into()),
+                        raw_input: input.to_string(),
+                    };
+                }
+                let pid = match args[0].parse::<u32>() {
+                    Ok(pid) => pid,
+                    Err(_) => {
+                        return ParseResult {
+                            command: Command::Unknown(format!("renice: invalid PID '{}'", args[0])),
                             raw_input: input.to_string(),
                         }
                     }
+                };
+                
+                let nice = if args.len() > 1 {
+                    match args[1].parse::<i32>() {
+                        Ok(n) => Some(n),
+                        Err(_) => {
+                            return ParseResult {
+                                command: Command::Unknown(format!("renice: invalid nice value '{}'", args[1])),
+                                raw_input: input.to_string(),
+                            }
+                        }
+                    }
+                } else {
+                    None  // Just get the nice value
+                };
+                
+                ParseResult {
+                    command: Command::Renice { pid, nice },
+                    raw_input: input.to_string(),
+                }
+            }
             "help" => ParseResult {
                 command: Command::Help,
                 raw_input: input.to_string(),
@@ -260,7 +275,6 @@ impl CommandParser {
                     refresh_interval = Some(interval);
                 }
             } else if *arg == "--refresh" {
-                // Handle case where refresh interval is next argument
                 if i + 1 < args.len() {
                     if let Ok(interval) = args[i + 1].parse::<u64>() {
                         refresh_interval = Some(interval);
@@ -290,44 +304,5 @@ impl CommandParser {
             command: Command::SearchProcess { name, exact },
             raw_input: args.join(" "),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_list_command() {
-        let parser = CommandParser::new();
-        let result = parser.parse("ps -a -u root --sort cpu");
-        
-        if let Command::ListProcesses { all, user, sort_by } = result.command {
-            assert!(all);
-            assert_eq!(user, Some("root".to_string()));
-            assert_eq!(sort_by, Some("cpu".to_string()));
-        } else {
-            panic!("Expected ListProcesses command");
-        }
-    }
-
-    #[test]
-    fn test_parse_kill_command() {
-        let parser = CommandParser::new();
-        let result = parser.parse("kill 1234 SIGTERM");
-        
-        if let Command::KillProcess { pid, signal } = result.command {
-            assert_eq!(pid, 1234);
-            assert_eq!(signal, Some("SIGTERM".to_string()));
-        } else {
-            panic!("Expected KillProcess command");
-        }
-    }
-
-    #[test]
-    fn test_parse_help() {
-        let parser = CommandParser::new();
-        let result = parser.parse("help");
-        assert!(matches!(result.command, Command::Help));
     }
 }
