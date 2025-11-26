@@ -2,8 +2,14 @@ mod parser;
 mod proc_reader;
 mod nice_renice;
 use nice_renice::{get_nice, set_nice, renice, spawn_with_nice};
+mod filter;
+mod proc_enhanced;
+mod search_service;
 
-
+use filter::{ProcessFilter, FilterCondition};
+use proc_reader::get_process_metrics;
+use crate::proc_enhanced::EnhancedProcessMetrics;
+use search_service::SearchService;
 use proc_reader::{enumerate_processes, parse_process};
 use parser::{Command, CommandParser};
 
@@ -88,11 +94,14 @@ fn main() {
 
         match result.command {
             Command::ListProcesses { all, user, sort_by } => {
-                // Use enumerate_processes() here too
-                let process_list = enumerate_processes();
-                // TODO: implement filtering by user and sorting later
-                for process in process_list {
-                    println!("{:?}", process);
+                for entry in std::fs::read_dir("/proc").unwrap() {
+                    let entry = entry.unwrap();
+                    let filename = entry.file_name();
+                    if let Ok(pid) = filename.to_str().unwrap_or("").parse::<u32>() {
+                        if let Ok(metrics) = get_process_metrics(pid) {
+                            println!("{:?}", metrics);
+                        }
+                    }
                 }
             }
             Command::KillProcess { pid, signal } => {
@@ -169,8 +178,99 @@ fn main() {
                 }
             }
             Command::SearchProcess { name, exact } => {
-                println!("Searching for process '{}' (exact: {})", name, exact);
-                // TODO: Implement actual process search
+                let search_service = SearchService::new();
+                match search_service.search_processes(&name, exact, None, None, None, None, None, None) {
+                    Ok(processes) => search_service.display_results(&processes),
+                    Err(e) => println!("Search error: {}", e),
+                }
+            }
+            Command::FilterProcess { 
+                name, 
+                user, 
+                min_cpu, 
+                max_cpu, 
+                min_mem, 
+                max_mem, 
+                state, 
+                exact 
+            } => {
+                // Get all processes
+                let all_processes = enumerate_processes();
+                
+                // Build filter
+                let mut filter = ProcessFilter::new();
+                
+                if let Some(name_val) = name {
+                    if exact {
+                        filter.add_condition(FilterCondition::NameExact(name_val));
+                    } else {
+                        filter.add_condition(FilterCondition::NameContains(name_val));
+                    }
+                }
+                
+                if let Some(user_val) = user {
+                    filter.add_condition(FilterCondition::User(user_val));
+                }
+                
+                if let Some(min) = min_cpu {
+                    filter.add_condition(FilterCondition::MinCpu(min));
+                }
+                
+                if let Some(max) = max_cpu {
+                    filter.add_condition(FilterCondition::MaxCpu(max));
+                }
+                
+                if let Some(min) = min_mem {
+                    filter.add_condition(FilterCondition::MinMemory(min));
+                }
+                
+                if let Some(max) = max_mem {
+                    filter.add_condition(FilterCondition::MaxMemory(max));
+                }
+                
+                if let Some(state_val) = state {
+                    filter.add_condition(FilterCondition::State(state_val));
+                }
+                
+                // Convert ProcessInfo to EnhancedProcessMetrics
+                let enhanced: Vec<EnhancedProcessMetrics> = all_processes
+                    .into_iter()
+                    .map(|p| EnhancedProcessMetrics {
+                        pid: p.pid,
+                        ppid: p.ppid,
+                        uid: p.uid,
+                        comm: p.name.clone(),
+                        user: p.username.clone(),
+                        state: p.state.clone(),
+                        cpu_time: p.cpu_time_ms as f64 / 1000.0,
+                        mem_usage: p.memory_kb,
+                        io_read_bytes: p.io_read_bytes,
+                        io_write_bytes: p.io_write_bytes,
+                    })
+                    .collect();
+                
+                // Apply filter
+                let filtered = filter.filter_processes(enhanced);
+                
+                // Display results
+                if filtered.is_empty() {
+                    println!("No processes found matching the criteria");
+                } else {
+                    println!("\nFound {} matching processes:", filtered.len());
+                    println!("{:<8} {:<20} {:<12} {:<8} {:<12} {:<10}", 
+                            "PID", "Name", "User", "State", "CPU(s)", "Mem(KB)");
+                    println!("{}", "-".repeat(80));
+                    
+                    for proc in filtered {
+                        println!("{:<8} {:<20} {:<12} {:<8} {:<12.2} {:<10}",
+                                proc.pid,
+                                &proc.comm[..proc.comm.len().min(20)],
+                                &proc.user[..proc.user.len().min(12)],
+                                proc.state,
+                                proc.cpu_time,
+                                proc.mem_usage);
+                    }
+                }
             }
             Command::Monitor { interval } => {
                 monitor_processes(interval);
@@ -193,14 +293,20 @@ fn main() {
 fn show_help() {
     println!("\nAvailable commands:");
     println!("  ps, list           - List processes");
-    println!("  kill PID [SIGNAL]  - Kill process with optional signal");
+    println!("  kill PID [SIGNAL]  - Kill process");
     println!("  info PID           - Show process information");
     println!("  stats              - Show system statistics");
-    println!("  search NAME        - Search for process by name");
-    println!("  nice N CMD [ARGS]  - Start CMD with nice value N (-20..19)");
-    println!("  renice PID [N]     - Get or set nice value of PID");
-    println!("                       renice 1234     -> get nice value");
-    println!("                       renice 1234 10  -> set nice value to 10");
+    println!("  search, filter [OPTIONS] - Search/filter processes");
+    println!("    -n, --name NAME    - Filter by name");
+    println!("    -u, --user USER    - Filter by user");
+    println!("    --min-cpu N        - Minimum CPU time (seconds)");
+    println!("    --max-cpu N        - Maximum CPU time");
+    println!("    --min-mem N        - Minimum memory (KB)");
+    println!("    --max-mem N        - Maximum memory (KB)");
+    println!("    -s, --state STATE  - Filter by state (R,S,D,Z,T)");
+    println!("    -e, --exact        - Exact name match");
+    println!("  nice N CMD [ARGS]  - Start CMD with nice value N");
+    println!("  renice PID [N]     - Get or set nice value");
     println!("  monitor [SEC]      - Live process monitor");
     println!("  help               - Show this help");
     println!("  exit, quit         - Exit");

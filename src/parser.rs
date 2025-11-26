@@ -34,6 +34,16 @@ pub enum Command {
         pid: u32, 
         nice: Option<i32>  // None = get, Some(value) = set
     },
+    FilterProcess { 
+        name: Option<String>,
+        user: Option<String>,
+        min_cpu: Option<f64>,
+        max_cpu: Option<f64>,
+        min_mem: Option<u64>,
+        max_mem: Option<u64>,
+        state: Option<String>,
+        exact: bool,
+    },
     Help,
     Exit,
     Unknown(String),
@@ -69,7 +79,7 @@ impl CommandParser {
             "kill" => self.parse_kill_command(&parts[1..]),
             "info" | "show" => self.parse_info_command(&parts[1..]),
             "stats" | "status" => self.parse_stats_command(&parts[1..]),
-            "search" | "find" => self.parse_search_command(&parts[1..]),
+            "search" | "find" | "filter"=> self.parse_search_command(&parts[1..]),
             "monitor" => {
                 let args = &parts[1..];
                 let interval = if !args.is_empty() {
@@ -288,20 +298,85 @@ impl CommandParser {
             raw_input: args.join(" "),
         }
     }
-
     fn parse_search_command(&self, args: &[&str]) -> ParseResult {
-        if args.is_empty() {
-            return ParseResult {
-                command: Command::Unknown("search: missing process name".to_string()),
-                raw_input: args.join(" "),
-            };
+        let mut name = None;
+        let mut user = None;
+        let mut min_cpu = None;
+        let mut max_cpu = None;
+        let mut min_mem = None;
+        let mut max_mem = None;
+        let mut state = None;
+        let mut exact = false;
+
+        let mut i = 0;
+        while i < args.len() {
+            match args[i] {
+                "-n" | "--name" => {
+                    if i + 1 < args.len() {
+                        name = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "-u" | "--user" => {
+                    if i + 1 < args.len() {
+                        user = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "--min-cpu" => {
+                    if i + 1 < args.len() {
+                        min_cpu = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--max-cpu" => {
+                    if i + 1 < args.len() {
+                        max_cpu = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--min-mem" => {
+                    if i + 1 < args.len() {
+                        min_mem = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--max-mem" => {
+                    if i + 1 < args.len() {
+                        max_mem = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "-s" | "--state" => {
+                    if i + 1 < args.len() {
+                        state = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "-e" | "--exact" => {
+                    exact = true;
+                }
+                _ => {
+                    // If no flag, treat as name
+                    if name.is_none() {
+                        name = Some(args[i].to_string());
+                    }
+                }
+            }
+            i += 1;
         }
 
-        let name = args[0].to_string();
-        let exact = args.iter().any(|&arg| arg == "-e" || arg == "--exact");
-
         ParseResult {
-            command: Command::SearchProcess { name, exact },
+            command: Command::FilterProcess {
+                name,
+                user,
+                min_cpu,
+                max_cpu,
+                min_mem,
+                max_mem,
+                state,
+                exact,
+            },
             raw_input: args.join(" "),
         }
     }
