@@ -16,3 +16,7 @@ hostname = "0.3" # For getting system hostname
 rhai = "1.16.1"  # or latest version
 nix = { version = "0.30.1", features = ["signal", "process"] }
 users = "0.11.0"
+iced = { version = "0.12", features = ["wgpu", "tokio"] }
+[[bin]]
+name = "gui_proc"
+path = "src/gui_proc.rs"
