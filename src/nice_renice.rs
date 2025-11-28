@@ -57,10 +57,11 @@ pub fn renice(pid: u32, delta: i32) -> Result<i32, String> {
 
 /// Spawn a new process with the given nice value
 pub fn spawn_with_nice(nice: i32, cmd: &str, args: &[String]) -> Result<Child, String> {
-    let child = ProcessCommand::new(cmd)  // Remove 'mut'
+    let mut child = ProcessCommand::new(cmd)
         .args(args)
         .spawn()
         .map_err(|e| format!("failed to start '{}': {}", cmd, e))?;
+
     // Set the child's nice value (absolute)
     if let Err(e) = set_nice(child.id(), nice) {
         eprintln!(

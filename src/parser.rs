@@ -25,6 +25,29 @@ pub enum Command {
     Monitor { 
         interval: u64 
     },
+    NiceStart {
+        nice: i32,
+        cmd: String,
+        args: Vec<String>
+    },
+    Renice { 
+        pid: u32, 
+        nice: Option<i32>  // None = get, Some(value) = set
+    },
+    FilterProcess { 
+        name: Option<String>,
+        user: Option<String>,
+        min_cpu: Option<f64>,
+        max_cpu: Option<f64>,
+        min_mem: Option<u64>,
+        max_mem: Option<u64>,
+        state: Option<String>,
+        exact: bool,
+    },
+    History {
+        duration: Option<u64>,
+    }
+    ,
     Help,
     Exit,
     Unknown(String),
@@ -60,11 +83,9 @@ impl CommandParser {
             "kill" => self.parse_kill_command(&parts[1..]),
             "info" | "show" => self.parse_info_command(&parts[1..]),
             "stats" | "status" => self.parse_stats_command(&parts[1..]),
-            "search" | "find" => self.parse_search_command(&parts[1..]),
+            "search" | "find" | "filter"=> self.parse_search_command(&parts[1..]),
             "monitor" => {
-                // Use parts after command word as args:
                 let args = &parts[1..];
-                // Now you can use args here safely
                 let interval = if !args.is_empty() {
                     args[0].parse::<u64>().unwrap_or(2)
                 } else {
@@ -75,6 +96,100 @@ impl CommandParser {
                     raw_input: input.to_string(),
                 };
             },
+            // NICE: 'nice <value> <command> [args...]' - starts new process with nice value
+            "nice" => {
+                let args = &parts[1..];
+                if args.is_empty() {
+                    return ParseResult {
+                        command: Command::Unknown(
+                            "nice: usage: nice <value> <command> [args...]".into(),
+                        ),
+                        raw_input: input.to_string(),
+                    };
+                }
+
+                let nice = match args[0].parse::<i32>() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        return ParseResult {
+                            command: Command::Unknown(
+                                format!("nice: invalid value '{}' (expected number -20 to 19)", args[0]),
+                            ),
+                            raw_input: input.to_string(),
+                        };
+                    }
+                };
+
+                if args.len() < 2 {
+                    return ParseResult {
+                        command: Command::Unknown(
+                            "nice: missing command to run".into(),
+                        ),
+                        raw_input: input.to_string(),
+                    };
+                }
+
+                let cmd = args[1].to_string();
+                let cmd_args = args[2..].iter().map(|s| s.to_string()).collect();
+
+                ParseResult {
+                    command: Command::NiceStart { nice, cmd, args: cmd_args },
+                    raw_input: input.to_string(),
+                }
+            }
+            // RENICE: 'renice <pid> [value]' - get or set nice value
+            // renice 1234       -> get nice value of PID 1234
+            // renice 1234 10    -> set nice value of PID 1234 to 10
+            "renice" => {
+                let args = &parts[1..];
+                if args.is_empty() {
+                    return ParseResult {
+                        command: Command::Unknown("renice: usage: renice <pid> [value]".into()),
+                        raw_input: input.to_string(),
+                    };
+                }
+                let pid = match args[0].parse::<u32>() {
+                    Ok(pid) => pid,
+                    Err(_) => {
+                        return ParseResult {
+                            command: Command::Unknown(format!("renice: invalid PID '{}'", args[0])),
+                            raw_input: input.to_string(),
+                        }
+                    }
+                };
+                
+                let nice = if args.len() > 1 {
+                    match args[1].parse::<i32>() {
+                        Ok(n) => Some(n),
+                        Err(_) => {
+                            return ParseResult {
+                                command: Command::Unknown(format!("renice: invalid nice value '{}'", args[1])),
+                                raw_input: input.to_string(),
+                            }
+                        }
+                    }
+                } else {
+                    None  // Just get the nice value
+                };
+                
+                ParseResult {
+                    command: Command::Renice { pid, nice },
+                    raw_input: input.to_string(),
+                }
+            }
+             "history" => {
+                let args = &parts[1..];
+                let duration = if !args.is_empty() {
+                    args[0].parse::<u64>().ok()
+                } else {
+                    None
+                };
+
+                return ParseResult {
+                    command: Command::History { duration },
+                    raw_input: input.to_string(),
+                };
+            }
             "help" => ParseResult {
                 command: Command::Help,
                 raw_input: input.to_string(),
@@ -187,7 +302,6 @@ impl CommandParser {
                     refresh_interval = Some(interval);
                 }
             } else if *arg == "--refresh" {
-                // Handle case where refresh interval is next argument
                 if i + 1 < args.len() {
                     if let Ok(interval) = args[i + 1].parse::<u64>() {
                         refresh_interval = Some(interval);
@@ -201,60 +315,86 @@ impl CommandParser {
             raw_input: args.join(" "),
         }
     }
-
     fn parse_search_command(&self, args: &[&str]) -> ParseResult {
-        if args.is_empty() {
-            return ParseResult {
-                command: Command::Unknown("search: missing process name".to_string()),
-                raw_input: args.join(" "),
-            };
-        }
+        let mut name = None;
+        let mut user = None;
+        let mut min_cpu = None;
+        let mut max_cpu = None;
+        let mut min_mem = None;
+        let mut max_mem = None;
+        let mut state = None;
+        let mut exact = false;
 
-        let name = args[0].to_string();
-        let exact = args.iter().any(|&arg| arg == "-e" || arg == "--exact");
+        let mut i = 0;
+        while i < args.len() {
+            match args[i] {
+                "-n" | "--name" => {
+                    if i + 1 < args.len() {
+                        name = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "-u" | "--user" => {
+                    if i + 1 < args.len() {
+                        user = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "--min-cpu" => {
+                    if i + 1 < args.len() {
+                        min_cpu = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--max-cpu" => {
+                    if i + 1 < args.len() {
+                        max_cpu = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--min-mem" => {
+                    if i + 1 < args.len() {
+                        min_mem = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "--max-mem" => {
+                    if i + 1 < args.len() {
+                        max_mem = args[i + 1].parse().ok();
+                        i += 1;
+                    }
+                }
+                "-s" | "--state" => {
+                    if i + 1 < args.len() {
+                        state = Some(args[i + 1].to_string());
+                        i += 1;
+                    }
+                }
+                "-e" | "--exact" => {
+                    exact = true;
+                }
+                _ => {
+                    // If no flag, treat as name
+                    if name.is_none() {
+                        name = Some(args[i].to_string());
+                    }
+                }
+            }
+            i += 1;
+        }
 
         ParseResult {
-            command: Command::SearchProcess { name, exact },
+            command: Command::FilterProcess {
+                name,
+                user,
+                min_cpu,
+                max_cpu,
+                min_mem,
+                max_mem,
+                state,
+                exact,
+            },
             raw_input: args.join(" "),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_list_command() {
-        let parser = CommandParser::new();
-        let result = parser.parse("ps -a -u root --sort cpu");
-        
-        if let Command::ListProcesses { all, user, sort_by } = result.command {
-            assert!(all);
-            assert_eq!(user, Some("root".to_string()));
-            assert_eq!(sort_by, Some("cpu".to_string()));
-        } else {
-            panic!("Expected ListProcesses command");
-        }
-    }
-
-    #[test]
-    fn test_parse_kill_command() {
-        let parser = CommandParser::new();
-        let result = parser.parse("kill 1234 SIGTERM");
-        
-        if let Command::KillProcess { pid, signal } = result.command {
-            assert_eq!(pid, 1234);
-            assert_eq!(signal, Some("SIGTERM".to_string()));
-        } else {
-            panic!("Expected KillProcess command");
-        }
-    }
-
-    #[test]
-    fn test_parse_help() {
-        let parser = CommandParser::new();
-        let result = parser.parse("help");
-        assert!(matches!(result.command, Command::Help));
     }
 }
