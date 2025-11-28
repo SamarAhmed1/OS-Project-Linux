@@ -5,14 +5,14 @@ use nice_renice::{get_nice, set_nice, renice, spawn_with_nice};
 mod filter;
 mod proc_enhanced;
 mod search_service;
-
+mod history;
 use filter::{ProcessFilter, FilterCondition};
 use proc_reader::get_process_metrics;
 use crate::proc_enhanced::EnhancedProcessMetrics;
 use search_service::SearchService;
 use proc_reader::{enumerate_processes, parse_process};
 use parser::{Command, CommandParser};
-
+use history::start_history_monitoring;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
@@ -273,7 +273,11 @@ fn main() {
                 }
             }
             Command::Monitor { interval } => {
-                monitor_processes(interval);
+                let interval = interval.clone();
+                std::thread::spawn(move || {
+                    monitor_processes(interval);
+                });
+                println!("Monitoring started in background.");
             }
             Command::Help => {
                 show_help();
@@ -281,6 +285,11 @@ fn main() {
             Command::Exit => {
                 println!("Goodbye!");
                 break;
+            }
+            Command::History { duration } => {
+                if let Err(e) = start_history_monitoring(duration.unwrap_or(0)) {
+                    println!("Error monitoring history: {}", e);
+                }
             }
             Command::Unknown(cmd) => {
                 println!("Unknown command: {}", cmd);
@@ -308,6 +317,7 @@ fn show_help() {
     println!("  nice N CMD [ARGS]  - Start CMD with nice value N");
     println!("  renice PID [N]     - Get or set nice value");
     println!("  monitor [SEC]      - Live process monitor");
+    println!("  history [SEC]      - Monitor finished processes (optional duration)");
     println!("  help               - Show this help");
     println!("  exit, quit         - Exit");
     println!();

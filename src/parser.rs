@@ -44,6 +44,10 @@ pub enum Command {
         state: Option<String>,
         exact: bool,
     },
+    History {
+        duration: Option<u64>,
+    }
+    ,
     Help,
     Exit,
     Unknown(String),
@@ -172,6 +176,19 @@ impl CommandParser {
                     command: Command::Renice { pid, nice },
                     raw_input: input.to_string(),
                 }
+            }
+             "history" => {
+                let args = &parts[1..];
+                let duration = if !args.is_empty() {
+                    args[0].parse::<u64>().ok()
+                } else {
+                    None
+                };
+
+                return ParseResult {
+                    command: Command::History { duration },
+                    raw_input: input.to_string(),
+                };
             }
             "help" => ParseResult {
                 command: Command::Help,
