@@ -19,6 +19,8 @@ use nix::unistd::Pid;
 // Import your existing modules
 mod proc_reader;
 mod nice_renice;
+mod history;
+use history::ProcessHistoryTracker;
 use proc_reader::{enumerate_processes, ProcessInfo};
 use nice_renice::{get_nice, set_nice, spawn_with_nice};
 
@@ -36,6 +38,7 @@ pub enum ViewMode {
     ProcessList,
     SystemStats,
     NiceManager,
+    ProcessHistory,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +52,7 @@ pub enum Message {
     ShowProcessList,
     ShowSystemStats,
     ShowNiceManager,
-    
+    ShowProcessHistory,
     // Process actions
     KillProcess(u32),
     SearchChanged(String),
@@ -87,6 +90,8 @@ pub struct ProcessManagerGui {
     renice_value: String,
     
     status_message: String,
+
+    history_tracker: Option<ProcessHistoryTracker>
 }
 
 // -------------------- ASYNC TASKS ----------------------
@@ -134,6 +139,13 @@ impl IcedApp for ProcessManagerGui {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
+    // Initialize the tracker HERE, before the Self block
+        let mut history_tracker = None;
+        if let Ok(mut t) = ProcessHistoryTracker::new() {
+            let _ = t.start_monitoring();
+            history_tracker = Some(t);
+        }
+        
         (
             Self {
                 view_mode: ViewMode::ProcessList,
@@ -147,6 +159,7 @@ impl IcedApp for ProcessManagerGui {
                 renice_target: String::new(),
                 renice_value: String::new(),
                 status_message: String::new(),
+                history_tracker,  // Use the variable we created above
             },
             Command::batch(vec![
                 Command::perform(fetch_processes(), Message::ProcessesLoaded),
@@ -163,6 +176,9 @@ impl IcedApp for ProcessManagerGui {
         match message {
             Message::Tick => {
                 self.last_refresh = Instant::now();
+                if let Some(ref mut tracker) = self.history_tracker {
+                    let _ = tracker.update();
+                }
                 Command::batch(vec![
                     Command::perform(fetch_processes(), Message::ProcessesLoaded),
                     Command::perform(fetch_system_stats(), Message::SystemStatsLoaded),
@@ -267,6 +283,11 @@ impl IcedApp for ProcessManagerGui {
                 Command::none()
             }
 
+            Message::ShowProcessHistory => {
+                self.view_mode = ViewMode::ProcessHistory;
+                Command::none()
+            }
+
             Message::ApplyRenice => {
                 if let Ok(pid) = self.renice_target.parse::<u32>() {
                     if let Ok(nice) = self.renice_value.parse::<i32>() {
@@ -323,6 +344,8 @@ impl IcedApp for ProcessManagerGui {
             Space::with_width(Length::Fill),
             button(text("🔄 Refresh"))
                 .on_press(Message::RefreshProcesses),
+                button(text("Process History"))
+                    .on_press(Message::ShowProcessHistory),
         ]
         .spacing(10)
         .padding(10);
@@ -339,6 +362,7 @@ impl IcedApp for ProcessManagerGui {
             ViewMode::ProcessList => self.view_process_list(),
             ViewMode::SystemStats => self.view_system_stats(),
             ViewMode::NiceManager => self.view_nice_manager(),
+            ViewMode::ProcessHistory => self.view_process_history(),
         };
 
         column![
@@ -512,6 +536,76 @@ impl ProcessManagerGui {
         .spacing(20)
         .padding(20)
         .into()
+    }
+
+    fn view_process_history(&self) -> Element<Message> {
+        if let Some(ref tracker) = self.history_tracker {
+            let finished_processes = tracker.get_finished_processes();
+            
+            // Header
+            let header = row![
+                text("PID").width(Length::Fixed(80.0)),
+                text("User").width(Length::Fixed(100.0)),
+                text("Command").width(Length::Fixed(250.0)),
+                text("Duration").width(Length::Fixed(100.0)),
+                text("CPU Time").width(Length::Fixed(100.0)),
+            ]
+            .spacing(10)
+            .padding(10);
+            
+            let mut history_rows = column![].spacing(5);
+            
+            if finished_processes.is_empty() {
+                history_rows = history_rows.push(
+                    text("No processes have finished yet. Keep the monitor running...")
+                        .size(16)
+                );
+            } else {
+                for proc in finished_processes.iter().rev().take(100) {  // Show last 100
+                    let duration_str = format!("{:.2}s", proc.duration.as_secs_f64());
+                    let cpu_str = format!("{:.2}s", proc.cpu_time_sec);
+                    let cmd = if proc.command.len() > 40 {
+                        format!("{}...", &proc.command[..37])
+                    } else {
+                        proc.command.clone()
+                    };
+                    
+                    let row_content = row![
+                        text(format!("{}", proc.pid)).width(Length::Fixed(80.0)),
+                        text(&proc.user).width(Length::Fixed(100.0)),
+                        text(cmd).width(Length::Fixed(250.0)),
+                        text(duration_str).width(Length::Fixed(100.0)),
+                        text(cpu_str).width(Length::Fixed(100.0)),
+                    ]
+                    .spacing(10)
+                    .padding(5);
+                    
+                    history_rows = history_rows.push(row_content);
+                }
+            }
+            
+            let list = scrollable(history_rows)
+                .height(Length::Fill);
+            
+            column![
+                text("Process History").size(28),
+                text(format!("Showing {} finished processes", finished_processes.len())).size(14),
+                Space::with_height(Length::Fixed(20.0)),
+                header,
+                list,
+            ]
+            .spacing(10)
+            .padding(20)
+            .into()
+        } else {
+            container(
+                text("History tracker not available").size(20)
+            )
+            .padding(20)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        }
     }
 }
 
