@@ -18,12 +18,22 @@ pub struct ProcessInfo {
     pub cpu_time_ms: u64,
     pub io_read_bytes: u64,
     pub io_write_bytes: u64,
+    pub nice: i32,  // Added nice value
     pub timestamp: SystemTime,
 }
 
 // Helper to read the entire contents of a file as String
 fn read_file(path: &str) -> io::Result<String> {
     fs::read_to_string(path)
+}
+
+/// Get the nice value from /proc/[pid]/stat
+fn get_nice_from_stat(stat_parts: &[&str]) -> i32 {
+    // Nice value is at index 18 in /proc/[pid]/stat
+    // Format: ... priority nice ...
+    stat_parts.get(18)
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0)
 }
 
 pub fn parse_process(pid: u32) -> Option<ProcessInfo> {
@@ -42,6 +52,9 @@ pub fn parse_process(pid: u32) -> Option<ProcessInfo> {
     let utime = stat_parts.get(13)?.parse::<u64>().ok()?;
     let stime = stat_parts.get(14)?.parse::<u64>().ok()?;
     let cpu_time_ms = (utime + stime) * 10; // Approximate; adjust if needed
+    
+    // Get nice value from stat
+    let nice = get_nice_from_stat(&stat_parts);
 
     // Read /proc/[pid]/status for UID and memory
     let status_content = read_file(&status_path).ok()?;
@@ -90,6 +103,7 @@ pub fn parse_process(pid: u32) -> Option<ProcessInfo> {
         cpu_time_ms,
         io_read_bytes: io_read,
         io_write_bytes: io_write,
+        nice,
         timestamp: SystemTime::now(),
     })
 }

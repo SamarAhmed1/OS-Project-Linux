@@ -43,8 +43,8 @@ fn monitor_processes(interval: u64) {
         print!("\x1B[2J\x1B[H");
 
         println!(
-            "{:<8} {:<15} {:<10} {:<10} {:<15} {:<15}",
-            "PID", "Process", "User", "%CPU", "Memory(KB)", "Read/Write (bytes)"
+            "{:<8} {:<15} {:<10} {:<6} {:<10} {:<15} {:<15}",
+            "PID", "Process", "User", "Nice", "%CPU", "Memory(KB)", "Read/Write (bytes)"
         );
 
         // Use enumerate_processes() here for unified collection
@@ -52,10 +52,11 @@ fn monitor_processes(interval: u64) {
         for process in process_list {
             // Assuming cpu_time is %CPU here as per ProcessInfo structure
             println!(
-                "{:<8} {:<15} {:<10} {:<10.2} {:<15} {:<7}/{}",
+                "{:<8} {:<15} {:<10} {:<6} {:<10.2} {:<15} {:<7}/{}",
                 process.pid,
                 process.name,
                 process.username,
+                process.nice,
                 process.cpu_time_ms as f64 / 1000.0, // assuming cpu_time_ms stored in ms
                 process.memory_kb,
                 process.io_read_bytes,
@@ -87,9 +88,31 @@ fn main() {
             Command::ListProcesses { all, user, sort_by } => {
                 // Use enumerate_processes() here too
                 let process_list = enumerate_processes();
-                // TODO: implement filtering by user and sorting later
+                
+                println!(
+                    "{:<8} {:<20} {:<12} {:<6} {:<10} {:<12}",
+                    "PID", "Name", "User", "Nice", "Memory(KB)", "CPU(ms)"
+                );
+                println!("{}", "-".repeat(80));
+                
                 for process in process_list {
-                    println!("{:?}", process);
+                    println!(
+                        "{:<8} {:<20} {:<12} {:<6} {:<10} {:<12}",
+                        process.pid,
+                        if process.name.len() > 20 {
+                            format!("{}...", &process.name[..17])
+                        } else {
+                            process.name.clone()
+                        },
+                        if process.username.len() > 12 {
+                            format!("{}...", &process.username[..9])
+                        } else {
+                            process.username.clone()
+                        },
+                        process.nice,
+                        process.memory_kb,
+                        process.cpu_time_ms
+                    );
                 }
             }
             Command::KillProcess { pid, signal } => {
@@ -105,7 +128,23 @@ fn main() {
             }
             Command::ProcessInfo { pid, detailed } => {
                 match proc_reader::parse_process(pid) {
-                    Some(metrics) => println!("{:?}", metrics),
+                    Some(process) => {
+                        println!("\n=== Process Information ===");
+                        println!("PID:          {}", process.pid);
+                        println!("PPID:         {}", process.ppid);
+                        println!("Name:         {}", process.name);
+                        println!("User:         {} (UID: {})", process.username, process.uid);
+                        println!("Nice:         {}", process.nice);
+                        println!("State:        {}", process.state);
+                        println!("Memory:       {} KB", process.memory_kb);
+                        println!("CPU Time:     {} ms", process.cpu_time_ms);
+                        println!("I/O Read:     {} bytes", process.io_read_bytes);
+                        println!("I/O Write:    {} bytes", process.io_write_bytes);
+                        if detailed {
+                            println!("Command:      {}", process.command);
+                        }
+                        println!();
+                    }
                     None => println!("Error reading process metrics for pid {}", pid),
                 }
             }
@@ -134,7 +173,38 @@ fn main() {
             }
             Command::SearchProcess { name, exact } => {
                 println!("Searching for process '{}' (exact: {})", name, exact);
-                // TODO: Implement actual process search
+                let process_list = enumerate_processes();
+                let mut found = false;
+                
+                println!(
+                    "{:<8} {:<20} {:<12} {:<6} {:<10}",
+                    "PID", "Name", "User", "Nice", "Memory(KB)"
+                );
+                println!("{}", "-".repeat(70));
+                
+                for process in process_list {
+                    let matches = if exact {
+                        process.name == name
+                    } else {
+                        process.name.to_lowercase().contains(&name.to_lowercase())
+                    };
+                    
+                    if matches {
+                        found = true;
+                        println!(
+                            "{:<8} {:<20} {:<12} {:<6} {:<10}",
+                            process.pid,
+                            process.name,
+                            process.username,
+                            process.nice,
+                            process.memory_kb
+                        );
+                    }
+                }
+                
+                if !found {
+                    println!("No processes found matching '{}'", name);
+                }
             }
             Command::Monitor { interval } => {
                 monitor_processes(interval);
@@ -161,7 +231,7 @@ fn show_help() {
     println!("  info, show PID     - Show process information (flags: -d/--detailed)");
     println!("  stats, status      - Show system statistics (flags: --refresh SECONDS)");
     println!("  search, find NAME  - Search for process by name (flags: -e/--exact)");
-    println!("  Monitor (Seconds)  - Live process monitor (refresh every N seconds)");
+    println!("  monitor SECONDS    - Live process monitor (refresh every N seconds)");
     println!("  help               - Show this help message");
     println!("  exit, quit         - Exit the program");
     println!();

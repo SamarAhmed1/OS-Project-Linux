@@ -284,7 +284,7 @@ impl IcedApp for ProcessManagerGui {
                 } else {
                     self.status_message = "✗ Invalid PID".to_string();
                 }
-                Command::none()
+                Command::perform(fetch_processes(), Message::ProcessesLoaded)
             }
 
             Message::GetNiceValue => {
@@ -367,14 +367,15 @@ impl ProcessManagerGui {
         .spacing(10)
         .padding(10);
 
-        // Header
+        // Header with Nice column
         let header = row![
-            text("PID").width(Length::Fixed(80.0)),
-            text("Name").width(Length::Fixed(150.0)),
-            text("User").width(Length::Fixed(100.0)),
-            text("CPU(ms)").width(Length::Fixed(80.0)),
-            text("Mem(KB)").width(Length::Fixed(100.0)),
-            text("Actions").width(Length::Fixed(100.0)),
+            text("PID").width(Length::Fixed(70.0)),
+            text("Name").width(Length::Fixed(140.0)),
+            text("User").width(Length::Fixed(90.0)),
+            text("Nice").width(Length::Fixed(50.0)),
+            text("CPU(ms)").width(Length::Fixed(70.0)),
+            text("Mem(KB)").width(Length::Fixed(80.0)),
+            text("Actions").width(Length::Fixed(80.0)),
         ]
         .spacing(10)
         .padding(10);
@@ -397,14 +398,15 @@ impl ProcessManagerGui {
 
         for process in &filtered {
             let row_content = row![
-                text(format!("{}", process.pid)).width(Length::Fixed(80.0)),
-                text(&process.name).width(Length::Fixed(150.0)),
-                text(&process.username).width(Length::Fixed(100.0)),
-                text(format!("{}", process.cpu_time_ms)).width(Length::Fixed(80.0)),
-                text(format!("{}", process.memory_kb)).width(Length::Fixed(100.0)),
+                text(format!("{}", process.pid)).width(Length::Fixed(70.0)),
+                text(&process.name).width(Length::Fixed(140.0)),
+                text(&process.username).width(Length::Fixed(90.0)),
+                text(format!("{}", process.nice)).width(Length::Fixed(50.0)),
+                text(format!("{}", process.cpu_time_ms)).width(Length::Fixed(70.0)),
+                text(format!("{}", process.memory_kb)).width(Length::Fixed(80.0)),
                 button(text("Kill"))
                     .on_press(Message::KillProcess(process.pid))
-                    .width(Length::Fixed(100.0)),
+                    .width(Length::Fixed(80.0)),
             ]
             .spacing(10)
             .padding(5);
