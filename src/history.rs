@@ -105,6 +105,15 @@ impl ProcessHistoryTracker {
     /// Read process information
     fn read_process_info(&self, pid: u32, now: SystemTime, now_instant: Instant) -> io::Result<ProcessInfo> {
         let stat_path = format!("/proc/{}/stat", pid);
+        
+        // Add explicit error handling
+        let stat_content = match fs::read_to_string(&stat_path) {
+            Ok(content) => content,
+            Err(e) => {
+                // Process likely terminated, this is expected
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Process terminated"));
+            }
+        };
         let cmdline_path = format!("/proc/{}/cmdline", pid);
         let status_path = format!("/proc/{}/status", pid);
 
